@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Stok Paper Roll</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- SheetJS (xlsx) for Excel processing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Font Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide-react@0.292.0/dist/lucide-react.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .chart-container {
+            position: relative;
+            height: 40vh;
+            width: 100%;
+        }
+        /* Custom scrollbar for better mobile experience */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background-color: #f1f1f1;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #888;
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background-color: #555;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-6 max-w-7xl">
+        <!-- Header -->
+        <header class="mb-6 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <div>
+                <h1 class="text-2xl md:text-3xl font-bold text-gray-900">Dashboard Stok Paper Roll</h1>
+                <p class="text-gray-500">Update data stok secara real-time, kini dengan upload Excel.</p>
+            </div>
+             <div class="flex items-center gap-2 p-3 bg-blue-600 text-white rounded-lg shadow-md">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-archive"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+                <span class="font-semibold">Inventaris Gudang</span>
+            </div>
+        </header>
+
+        <!-- Ringkasan Stok -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                <h3 class="text-sm font-medium text-gray-500">Total Stok Aktual (KG)</h3>
+                <p id="total-stock" class="text-2xl font-semibold text-blue-600">0</p>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                <h3 class="text-sm font-medium text-gray-500">Jumlah Part No</h3>
+                <p id="total-part-no" class="text-2xl font-semibold text-green-600">0</p>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                <h3 class="text-sm font-medium text-gray-500">Stok Terendah</h3>
+                <p id="lowest-stock-item" class="text-base font-semibold text-yellow-600 truncate">-</p>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                <h3 class="text-sm font-medium text-gray-500">Stok Tertinggi</h3>
+                <p id="highest-stock-item" class="text-base font-semibold text-purple-600 truncate">-</p>
+            </div>
+        </div>
+
+        <!-- Chart Section -->
+        <div class="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+            <h2 class="text-xl font-bold mb-4">Grafik Stok Aktual per Part No</h2>
+            <div class="chart-container">
+                <canvas id="stockChart"></canvas>
+            </div>
+            <div class="mt-4 flex flex-col sm:flex-row gap-2">
+                 <button id="share-whatsapp" class="w-full sm:w-auto flex items-center justify-center gap-2 bg-green-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-green-600 transition duration-300">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-share-2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
+                    Kirim via WhatsApp
+                </button>
+                <button id="download-chart" class="w-full sm:w-auto flex items-center justify-center gap-2 bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-600 transition duration-300">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                    Download Chart
+                </button>
+            </div>
+        </div>
+        
+        <!-- Tabel Stok -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200">
+            <div class="p-4 md:p-6 flex flex-wrap justify-between items-center gap-3 border-b border-gray-200">
+                <h2 class="text-xl font-bold">Daftar Stok</h2>
+                <div class="flex flex-wrap gap-2">
+                    <label for="excel-upload" class="cursor-pointer flex items-center gap-2 bg-green-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-green-700 transition duration-300">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-file-up"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 12v6"/><path d="m15 15-3-3-3 3"/></svg>
+                        <span>Upload Excel</span>
+                    </label>
+                    <input type="file" id="excel-upload" class="hidden" accept=".xlsx, .xls">
+
+                    <button id="add-stock-btn" class="flex items-center gap-2 bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 transition duration-300">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-plus-circle"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="16"/><line x1="8" x2="16" y1="12" y2="12"/></svg>
+                        <span>Tambah Manual</span>
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-x-auto custom-scrollbar">
+                <table class="w-full text-left min-w-[1200px]">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="p-4 font-semibold">Posting Date</th>
+                            <th class="p-4 font-semibold">Part No</th>
+                            <th class="p-4 font-semibold">Kind</th>
+                            <th class="p-4 font-semibold">GSM</th>
+                            <th class="p-4 font-semibold">Width (cm)</th>
+                            <th class="p-4 font-semibold">Qty Actual (KG)</th>
+                            <th class="p-4 font-semibold">Storage Bin</th>
+                            <th class="p-4 font-semibold">Diameter (cm)</th>
+                            <th class="p-4 font-semibold">Length (m)</th>
+                            <th class="p-4 font-semibold text-center">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stock-table-body" class="divide-y divide-gray-200">
+                        <!-- Data akan diisi oleh JavaScript -->
+                    </tbody>
+                </table>
+                 <div id="empty-state" class="text-center py-10 px-4 hidden">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-gray-400 lucide lucide-boxes"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+                    <p class="mt-4 text-gray-500">Belum ada data stok. Silakan tambahkan data manual atau upload dari file Excel.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Tambah/Edit Stok -->
+    <div id="stock-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg transform transition-all max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div class="p-6 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white">
+                <h3 id="modal-title" class="text-xl font-bold">Tambah Stok Baru</h3>
+                <button id="close-modal-btn" class="text-gray-400 hover:text-gray-600">
+                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+            </div>
+            <form id="stock-form" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input type="hidden" id="stock-id">
+                <div>
+                    <label for="postingDate" class="block text-sm font-medium text-gray-700 mb-1">Posting Date</label>
+                    <input type="date" id="postingDate" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" required>
+                </div>
+                <div>
+                    <label for="partNo" class="block text-sm font-medium text-gray-700 mb-1">Part No</label>
+                    <input type="text" id="partNo" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Contoh: AP-150-90" required>
+                </div>
+                 <div>
+                    <label for="kind" class="block text-sm font-medium text-gray-700 mb-1">Kind (Jenis)</label>
+                    <input type="text" id="kind" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Contoh: Art Paper" required>
+                </div>
+                <div>
+                    <label for="gsm" class="block text-sm font-medium text-gray-700 mb-1">Gramasi (GSM)</label>
+                    <input type="number" id="gsm" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Contoh: 150" required>
+                </div>
+                <div>
+                    <label for="width" class="block text-sm font-medium text-gray-700 mb-1">Width (cm)</label>
+                    <input type="number" id="width" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Contoh: 90" required>
+                </div>
+                 <div>
+                    <label for="qtyActual" class="block text-sm font-medium text-gray-700 mb-1">Qty Actual (KG)</label>
+                    <input type="number" id="qtyActual" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Contoh: 2500" required>
+                </div>
+                <div>
+                    <label for="storageBin" class="block text-sm font-medium text-gray-700 mb-1">Storage Bin</label>
+                    <input type="text" id="storageBin" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Contoh: R-01-A">
+                </div>
+                <div>
+                    <label for="diameter" class="block text-sm font-medium text-gray-700 mb-1">Diameter (cm)</label>
+                    <input type="number" step="0.1" id="diameter" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Contoh: 100.5">
+                </div>
+                 <div>
+                    <label for="length" class="block text-sm font-medium text-gray-700 mb-1">Length (m)</label>
+                    <input type="number" step="0.1" id="length" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Contoh: 5000">
+                </div>
+                <div class="md:col-span-2 flex justify-end gap-3 pt-4">
+                    <button type="button" id="cancel-btn" class="bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-lg hover:bg-gray-300 transition duration-300">Batal</button>
+                    <button type="submit" class="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 transition duration-300">Simpan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-gray-800 text-white py-2 px-4 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 z-50">
+        <p id="toast-message"></p>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // DOM Elements
+    const addStockBtn = document.getElementById('add-stock-btn');
+    const stockModal = document.getElementById('stock-modal');
+    const closeModalBtn = document.getElementById('close-modal-btn');
+    const cancelBtn = document.getElementById('cancel-btn');
+    const stockForm = document.getElementById('stock-form');
+    const stockTableBody = document.getElementById('stock-table-body');
+    const emptyState = document.getElementById('empty-state');
+    const shareWhatsappBtn = document.getElementById('share-whatsapp');
+    const downloadChartBtn = document.getElementById('download-chart');
+    const excelUploadInput = document.getElementById('excel-upload');
+
+    // Initial data (contoh)
+    let stockData = JSON.parse(localStorage.getItem('paperStockDataV2')) || [];
+
+    let stockChart;
+
+    // --- Modal Logic ---
+    const openModal = () => stockModal.classList.remove('hidden');
+    const closeModal = () => {
+        stockModal.classList.add('hidden');
+        stockForm.reset();
+        document.getElementById('stock-id').value = '';
+        document.getElementById('modal-title').textContent = 'Tambah Stok Baru';
+    };
+
+    addStockBtn.addEventListener('click', () => {
+        document.getElementById('postingDate').valueAsDate = new Date();
+        openModal();
+    });
+    closeModalBtn.addEventListener('click', closeModal);
+    cancelBtn.addEventListener('click', closeModal);
+    stockModal.addEventListener('click', (e) => {
+        if (e.target === stockModal) closeModal();
+    });
+
+    // --- Toast Notification ---
+    const showToast = (message, isError = false) => {
+        const toast = document.getElementById('toast');
+        const toastMessage = document.getElementById('toast-message');
+        toastMessage.textContent = message;
+        toast.style.backgroundColor = isError ? '#ef4444' : '#1f2937';
+        toast.classList.remove('translate-y-20', 'opacity-0');
+        toast.classList.add('translate-y-0', 'opacity-100');
+        setTimeout(() => {
+            toast.classList.remove('translate-y-0', 'opacity-100');
+            toast.classList.add('translate-y-20', 'opacity-0');
+        }, 3000);
+    };
+
+    // --- Data Handling ---
+    const saveData = () => {
+        localStorage.setItem('paperStockDataV2', JSON.stringify(stockData));
+    };
+
+    const renderTable = () => {
+        stockTableBody.innerHTML = '';
+        if (stockData.length === 0) {
+            emptyState.classList.remove('hidden');
+        } else {
+            emptyState.classList.add('hidden');
+            // Sort by latest posting date
+            const sortedData = [...stockData].sort((a, b) => new Date(b.postingDate) - new Date(a.postingDate));
+            sortedData.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="p-4">${item.postingDate ? new Date(item.postingDate).toLocaleDateString('id-ID') : '-'}</td>
+                    <td class="p-4 font-medium">${item.partNo || '-'}</td>
+                    <td class="p-4">${item.kind || '-'}</td>
+                    <td class="p-4">${item.gsm || '-'}</td>
+                    <td class="p-4">${item.width || '-'}</td>
+                    <td class="p-4 font-bold ${item.qtyActual < 1000 ? 'text-red-500' : 'text-gray-800'}">${item.qtyActual ? item.qtyActual.toLocaleString('id-ID') : '0'}</td>
+                    <td class="p-4">${item.storageBin || '-'}</td>
+                    <td class="p-4">${item.diameter || '-'}</td>
+                    <td class="p-4">${item.length || '-'}</td>
+                    <td class="p-4 text-center space-x-2">
+                        <button class="edit-btn p-1 text-blue-500 hover:text-blue-700" data-id="${item.id}">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                        </button>
+                        <button class="delete-btn p-1 text-red-500 hover:text-red-700" data-id="${item.id}">
+                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                        </button>
+                    </td>
+                `;
+                stockTableBody.appendChild(row);
+            });
+        }
+    };
+
+    const updateSummary = () => {
+        const totalStock = stockData.reduce((sum, item) => sum + (item.qtyActual || 0), 0);
+        const totalPartNo = new Set(stockData.map(item => item.partNo)).size;
+        
+        document.getElementById('total-stock').textContent = totalStock.toLocaleString('id-ID');
+        document.getElementById('total-part-no').textContent = totalPartNo;
+
+        if (stockData.length > 0) {
+            const sortedByStock = [...stockData].sort((a, b) => a.qtyActual - b.qtyActual);
+            document.getElementById('lowest-stock-item').textContent = `${sortedByStock[0].partNo} (${(sortedByStock[0].qtyActual || 0).toLocaleString('id-ID')} KG)`;
+            document.getElementById('highest-stock-item').textContent = `${sortedByStock[sortedByStock.length - 1].partNo} (${(sortedByStock[sortedByStock.length - 1].qtyActual || 0).toLocaleString('id-ID')} KG)`;
+        } else {
+            document.getElementById('lowest-stock-item').textContent = '-';
+            document.getElementById('highest-stock-item').textContent = '-';
+        }
+    };
+    
+    const renderChart = () => {
+        const ctx = document.getElementById('stockChart').getContext('2d');
+        const aggregatedData = stockData.reduce((acc, item) => {
+            if (!acc[item.partNo]) {
+                acc[item.partNo] = 0;
+            }
+            acc[item.partNo] += item.qtyActual || 0;
+            return acc;
+        }, {});
+        
+        const labels = Object.keys(aggregatedData);
+        const data = Object.values(aggregatedData);
+
+        if (stockChart) {
+            stockChart.destroy();
+        }
+
+        stockChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Stok Aktual (KG)',
+                    data: data,
+                    backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                    borderColor: 'rgba(59, 130, 246, 1)',
+                    borderWidth: 1,
+                    borderRadius: 5,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) label += ': ';
+                                if (context.parsed.y !== null) label += context.parsed.y.toLocaleString('id-ID') + ' KG';
+                                return label;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: '#e5e7eb' },
+                        ticks: { callback: value => value.toLocaleString('id-ID') }
+                    },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    };
+
+    const refreshDashboard = () => {
+        saveData();
+        renderTable();
+        updateSummary();
+        renderChart();
+    };
+
+    // --- Form Submission ---
+    stockForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const id = document.getElementById('stock-id').value;
+        const newStock = {
+            postingDate: document.getElementById('postingDate').value,
+            partNo: document.getElementById('partNo').value,
+            kind: document.getElementById('kind').value,
+            gsm: parseFloat(document.getElementById('gsm').value) || 0,
+            width: parseFloat(document.getElementById('width').value) || 0,
+            qtyActual: parseFloat(document.getElementById('qtyActual').value) || 0,
+            storageBin: document.getElementById('storageBin').value,
+            diameter: parseFloat(document.getElementById('diameter').value) || 0,
+            length: parseFloat(document.getElementById('length').value) || 0,
+        };
+
+        if (id) {
+            const index = stockData.findIndex(item => item.id == id);
+            stockData[index] = { ...stockData[index], ...newStock };
+            showToast('Data stok berhasil diperbarui!');
+        } else {
+            newStock.id = Date.now();
+            stockData.push(newStock);
+            showToast('Stok baru berhasil ditambahkan!');
+        }
+        
+        closeModal();
+        refreshDashboard();
+    });
+
+    // --- Edit and Delete ---
+    stockTableBody.addEventListener('click', (e) => {
+        const editBtn = e.target.closest('.edit-btn');
+        if (editBtn) {
+            const id = editBtn.dataset.id;
+            const item = stockData.find(d => d.id == id);
+            document.getElementById('stock-id').value = item.id;
+            document.getElementById('postingDate').value = item.postingDate;
+            document.getElementById('partNo').value = item.partNo;
+            document.getElementById('kind').value = item.kind;
+            document.getElementById('gsm').value = item.gsm;
+            document.getElementById('width').value = item.width;
+            document.getElementById('qtyActual').value = item.qtyActual;
+            document.getElementById('storageBin').value = item.storageBin;
+            document.getElementById('diameter').value = item.diameter;
+            document.getElementById('length').value = item.length;
+            document.getElementById('modal-title').textContent = 'Edit Stok';
+            openModal();
+        }
+        
+        const deleteBtn = e.target.closest('.delete-btn');
+        if (deleteBtn) {
+            const id = deleteBtn.dataset.id;
+            if (confirm('Apakah Anda yakin ingin menghapus data ini?')) {
+                stockData = stockData.filter(d => d.id != id);
+                showToast('Data stok berhasil dihapus.');
+                refreshDashboard();
+            }
+        }
+    });
+    
+    // --- Excel Upload ---
+    excelUploadInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const data = new Uint8Array(event.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const json = XLSX.utils.sheet_to_json(worksheet);
+
+                // Simple validation
+                if (json.length === 0) {
+                   showToast('File Excel kosong atau format tidak sesuai.', true);
+                   return;
+                }
+
+                const newEntries = json.map(row => ({
+                    id: Date.now() + Math.random(),
+                    postingDate: row['Posting Date'] ? new Date((row['Posting Date'] - (25567 + 2)) * 86400 * 1000).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                    partNo: row['Part No'],
+                    kind: row['Kind'],
+                    gsm: row['Gsm'],
+                    width: row['Width'],
+                    qtyActual: row['Qty Actual'],
+                    storageBin: row['Storage Bin'],
+                    diameter: row['Diameter'],
+                    length: row['Length']
+                }));
+
+                stockData = [...stockData, ...newEntries];
+                refreshDashboard();
+                showToast(`${newEntries.length} data berhasil diimpor dari Excel!`);
+            } catch (error) {
+                console.error("Error processing Excel file:", error);
+                showToast('Gagal memproses file Excel. Pastikan format benar.', true);
+            } finally {
+                // Reset file input
+                e.target.value = '';
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+
+
+    // --- Share and Download ---
+    const shareOrDownload = async (action) => {
+        const chartCanvas = document.getElementById('stockChart');
+        // Temporarily change background to white for the image
+        const originalBg = chartCanvas.style.backgroundColor;
+        chartCanvas.style.backgroundColor = 'white';
+        stockChart.options.animation = false;
+        stockChart.update();
+
+        const dataUrl = chartCanvas.toDataURL('image/png');
+        
+        // Restore original state
+        stockChart.options.animation = true;
+        stockChart.update();
+        chartCanvas.style.backgroundColor = originalBg;
+
+        if (action === 'download') {
+            const link = document.createElement('a');
+            link.href = dataUrl;
+            link.download = 'laporan-stok-paper-roll.png';
+            link.click();
+            showToast('Chart berhasil diunduh.');
+            return;
+        }
+
+        if (action === 'share') {
+            try {
+                const response = await fetch(dataUrl);
+                const blob = await response.blob();
+                const file = new File([blob], 'laporan-stok-paper-roll.png', { type: 'image/png' });
+
+                if (navigator.share && navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        title: 'Laporan Stok Paper Roll',
+                        text: 'Berikut adalah laporan stok paper roll terkini.',
+                        files: [file],
+                    });
+                    showToast('Laporan sedang dibagikan...');
+                } else {
+                    showToast('Fitur share tidak didukung. Silakan download chart.', true);
+                }
+            } catch (error) {
+                console.error('Error sharing:', error);
+                showToast('Gagal membagikan laporan. Coba lagi.', true);
+            }
+        }
+    };
+    
+    shareWhatsappBtn.addEventListener('click', () => shareOrDownload('share'));
+    downloadChartBtn.addEventListener('click', () => shareOrDownload('download'));
+
+
+    // Initial Load
+    refreshDashboard();
+});
+</script>
+
+</body>
+</html>
+
