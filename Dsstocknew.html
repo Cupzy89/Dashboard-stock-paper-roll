@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Stok Gulungan Kertas</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- SheetJS (xlsx) for reading Excel files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Lucide Icons for UI icons -->
+    <script src="https://unpkg.com/lucide-react@0.292.0/dist/umd/lucide.min.js"></script>
+    
+    <style>
+        /* Menggunakan font Inter dari Google Fonts */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5; /* Warna latar belakang abu-abu muda */
+        }
+        /* Style untuk scrollbar agar lebih modern */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        .chart-container {
+            position: relative;
+            height: 350px;
+            width: 100%;
+        }
+        /* Animasi fade-in untuk modal */
+        .modal-enter {
+            opacity: 0;
+            transform: scale(0.95);
+        }
+        .modal-enter-active {
+            opacity: 1;
+            transform: scale(1);
+            transition: opacity 300ms, transform 300ms;
+        }
+        .modal-exit {
+            opacity: 1;
+            transform: scale(1);
+        }
+        .modal-exit-active {
+            opacity: 0;
+            transform: scale(0.95);
+            transition: opacity 300ms, transform 300ms;
+        }
+    </style>
+</head>
+<body class="text-gray-800">
+
+    <div id="app" class="p-4 sm:p-6 lg:p-8">
+        <!-- Header -->
+        <header class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-900">Dashboard Stok Gulungan Kertas</h1>
+                <p class="text-gray-500 mt-1">Analisis dan visualisasi stok persediaan Anda.</p>
+            </div>
+            <div class="mt-4 sm:mt-0 flex items-center space-x-2">
+                <input type="file" id="excel-uploader" class="hidden" accept=".xlsx, .xls">
+                <button onclick="document.getElementById('excel-uploader').click()" class="bg-white text-gray-700 hover:bg-gray-100 font-semibold py-2 px-4 border border-gray-300 rounded-lg shadow-sm flex items-center transition duration-150 ease-in-out">
+                    <i data-lucide="upload" class="w-4 h-4 mr-2"></i>
+                    Unggah Excel
+                </button>
+                 <button onclick="sendWhatsAppReport()" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg shadow-sm flex items-center transition duration-150 ease-in-out">
+                    <i data-lucide="send" class="w-4 h-4 mr-2"></i>
+                    WhatsApp
+                </button>
+                <button onclick="sendEmailReport()" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow-sm flex items-center transition duration-150 ease-in-out">
+                    <i data-lucide="mail" class="w-4 h-4 mr-2"></i>
+                    Email
+                </button>
+            </div>
+        </header>
+
+        <!-- Ringkasan Metrik -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+            <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                <h3 class="text-gray-500 text-sm font-medium">Total Kuantitas (Kg)</h3>
+                <p id="total-qty" class="text-3xl font-bold mt-2">0</p>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                <h3 class="text-gray-500 text-sm font-medium">Total Gulungan</h3>
+                <p id="total-rolls" class="text-3xl font-bold mt-2">0</p>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                <h3 class="text-gray-500 text-sm font-medium">Jenis Kertas Berbeda</h3>
+                <p id="unique-kinds" class="text-3xl font-bold mt-2">0</p>
+            </div>
+             <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                <h3 class="text-gray-500 text-sm font-medium">Lokasi Penyimpanan</h3>
+                <p id="unique-bins" class="text-3xl font-bold mt-2">0</p>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                <h3 class="font-semibold text-lg mb-4">Distribusi Stok Berdasarkan Jenis Kertas</h3>
+                <div class="chart-container">
+                    <canvas id="kind-chart"></canvas>
+                </div>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                <h3 class="font-semibold text-lg mb-4">Total Kuantitas (Kg) per GSM</h3>
+                 <div class="chart-container">
+                    <canvas id="gsm-chart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Tabel Data -->
+        <div class="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
+            <div class="p-6">
+                 <h3 class="font-semibold text-lg">Detail Data Stok</h3>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left text-gray-500">
+                    <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                        <tr>
+                            <th scope="col" class="px-6 py-3">Tgl. Posting</th>
+                            <th scope="col" class="px-6 py-3">Part No</th>
+                            <th scope="col" class="px-6 py-3">Jenis</th>
+                            <th scope="col" class="px-6 py-3">GSM</th>
+                            <th scope="col" class="px-6 py-3">Lebar (mm)</th>
+                            <th scope="col" class="px-6 py-3">Qty (Kg)</th>
+                            <th scope="col" class="px-6 py-3">Roll</th>
+                            <th scope="col" class="px-6 py-3">Lokasi</th>
+                            <th scope="col" class="px-6 py-3">Diameter (mm)</th>
+                            <th scope="col" class="px-6 py-3">Panjang (m)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stock-table-body">
+                       <!-- Data akan diisi oleh JavaScript -->
+                    </tbody>
+                </table>
+                 <div id="no-data" class="text-center py-12 text-gray-500">
+                    <i data-lucide="info" class="w-12 h-12 mx-auto mb-2"></i>
+                    <p>Data belum ada. Silakan unggah file Excel untuk memulai.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal Notifikasi -->
+    <div id="notification-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 hidden modal-exit">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm text-center">
+            <div id="modal-icon" class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100">
+                 <!-- Icon akan diisi oleh JS -->
+            </div>
+            <h3 id="modal-title" class="text-lg leading-6 font-medium text-gray-900 mt-4">Berhasil</h3>
+            <div class="mt-2">
+                <p id="modal-message" class="text-sm text-gray-500">Pesan notifikasi.</p>
+            </div>
+            <div class="mt-4">
+                <button type="button" class="inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none sm:text-sm" onclick="hideModal()">
+                    Tutup
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // Data awal sebagai contoh
+        let stockData = [
+            { "Posting date": "2023-10-01", "Part no": "PN-001", "Kind": "Kraft Liner", "Gsm": 150, "Width": 1200, "Qty": 2500, "Roll": 2, "Storage bin": "A1-01", "Diameter": 1100, "Length": 2080 },
+            { "Posting date": "2023-10-02", "Part no": "PN-002", "Kind": "Test Liner", "Gsm": 125, "Width": 1100, "Qty": 1800, "Roll": 1, "Storage bin": "A1-02", "Diameter": 1000, "Length": 1900 },
+            { "Posting date": "2023-10-02", "Part no": "PN-003", "Kind": "Corrugating Medium", "Gsm": 115, "Width": 1200, "Qty": 3200, "Roll": 3, "Storage bin": "B2-05", "Diameter": 1150, "Length": 3700 },
+            { "Posting date": "2023-10-03", "Part no": "PN-001", "Kind": "Kraft Liner", "Gsm": 150, "Width": 1200, "Qty": 2600, "Roll": 2, "Storage bin": "A1-03", "Diameter": 1120, "Length": 2150 },
+            { "Posting date": "2023-10-04", "Part no": "PN-004", "Kind": "White Top", "Gsm": 140, "Width": 1300, "Qty": 4500, "Roll": 4, "Storage bin": "C1-11", "Diameter": 1200, "Length": 4200 },
+        ];
+        
+        let kindChart, gsmChart;
+
+        // --- FUNGSI UTAMA ---
+        function initializeApp() {
+            lucide.createIcons(); // Inisialisasi ikon
+            document.getElementById('excel-uploader').addEventListener('change', handleExcelUpload);
+            updateDashboard();
+        }
+
+        function updateDashboard() {
+            updateMetrics();
+            updateTable();
+            updateCharts();
+        }
+
+        // --- PEMBARUAN UI ---
+        function updateMetrics() {
+            const totalQty = stockData.reduce((sum, item) => sum + (item.Qty || 0), 0);
+            const totalRolls = stockData.reduce((sum, item) => sum + (item.Roll || 0), 0);
+            const uniqueKinds = new Set(stockData.map(item => item.Kind)).size;
+            const uniqueBins = new Set(stockData.map(item => item["Storage bin"])).size;
+
+            document.getElementById('total-qty').textContent = totalQty.toLocaleString('id-ID');
+            document.getElementById('total-rolls').textContent = totalRolls.toLocaleString('id-ID');
+            document.getElementById('unique-kinds').textContent = uniqueKinds;
+            document.getElementById('unique-bins').textContent = uniqueBins;
+        }
+
+        function updateTable() {
+            const tableBody = document.getElementById('stock-table-body');
+            const noDataEl = document.getElementById('no-data');
+            
+            tableBody.innerHTML = ''; // Kosongkan tabel
+            
+            if (stockData.length === 0) {
+                noDataEl.style.display = 'block';
+                return;
+            }
+            
+            noDataEl.style.display = 'none';
+
+            stockData.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.className = 'bg-white border-b hover:bg-gray-50';
+                tr.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap">${row["Posting date"] || ''}</td>
+                    <td class="px-6 py-4 font-medium text-gray-900">${row["Part no"] || ''}</td>
+                    <td class="px-6 py-4">${row.Kind || ''}</td>
+                    <td class="px-6 py-4">${row.Gsm || ''}</td>
+                    <td class="px-6 py-4">${row.Width || ''}</td>
+                    <td class="px-6 py-4 font-semibold">${(row.Qty || 0).toLocaleString('id-ID')}</td>
+                    <td class="px-6 py-4">${row.Roll || ''}</td>
+                    <td class="px-6 py-4">${row["Storage bin"] || ''}</td>
+                    <td class="px-6 py-4">${row.Diameter || ''}</td>
+                    <td class="px-6 py-4">${row.Length || ''}</td>
+                `;
+                tableBody.appendChild(tr);
+            });
+        }
+        
+        function updateCharts() {
+            // Data untuk Chart Jenis Kertas
+            const kindData = stockData.reduce((acc, item) => {
+                acc[item.Kind] = (acc[item.Kind] || 0) + item.Qty;
+                return acc;
+            }, {});
+            
+            // Data untuk Chart GSM
+            const gsmData = stockData.reduce((acc, item) => {
+                acc[item.Gsm] = (acc[item.Gsm] || 0) + item.Qty;
+                return acc;
+            }, {});
+            const sortedGsm = Object.keys(gsmData).sort((a,b) => a-b);
+            const sortedGsmData = sortedGsm.map(gsm => gsmData[gsm]);
+
+            const chartColors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#6366F1'];
+
+            // Inisialisasi atau update Chart Jenis Kertas
+            const kindCtx = document.getElementById('kind-chart').getContext('2d');
+            if (kindChart) kindChart.destroy();
+            kindChart = new Chart(kindCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(kindData),
+                    datasets: [{
+                        label: 'Kuantitas (Kg)',
+                        data: Object.values(kindData),
+                        backgroundColor: chartColors,
+                        borderColor: '#FFFFFF',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    }
+                }
+            });
+
+            // Inisialisasi atau update Chart GSM
+            const gsmCtx = document.getElementById('gsm-chart').getContext('2d');
+            if (gsmChart) gsmChart.destroy();
+            gsmChart = new Chart(gsmCtx, {
+                type: 'bar',
+                data: {
+                    labels: sortedGsm,
+                    datasets: [{
+                        label: 'Total Kuantitas (Kg)',
+                        data: sortedGsmData,
+                        backgroundColor: '#3B82F6',
+                        borderColor: '#2563EB',
+                        borderWidth: 1,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { beginAtZero: true }
+                    },
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+        }
+
+        // --- FUNGSI EVENT HANDLER ---
+        function handleExcelUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                // Mengkonversi sheet ke JSON dengan header yang diharapkan
+                const json = XLSX.utils.sheet_to_json(worksheet);
+                
+                // Normalisasi nama kolom (case-insensitive dan trim)
+                const normalizedJson = json.map(row => {
+                    const newRow = {};
+                    const keyMap = {
+                        "postingdate": "Posting date", "posting date": "Posting date",
+                        "partno": "Part no", "part no": "Part no",
+                        "kind": "Kind",
+                        "gsm": "Gsm",
+                        "width": "Width", "widht": "Width",
+                        "qty": "Qty",
+                        "roll": "Roll",
+                        "storagebin": "Storage bin", "storage bin": "Storage bin",
+                        "diameter": "Diameter",
+                        "length": "Length", "lenght": "Length"
+                    };
+
+                    for(const key in row) {
+                        const normalizedKey = key.toLowerCase().trim();
+                        if(keyMap[normalizedKey]) {
+                            newRow[keyMap[normalizedKey]] = row[key];
+                        }
+                    }
+                    return newRow;
+                });
+
+                stockData = normalizedJson;
+                updateDashboard();
+                showModal('success', 'Upload Berhasil', 'Data dari file Excel berhasil dimuat ke dashboard.');
+            };
+            reader.readAsArrayBuffer(file);
+            event.target.value = ''; // Reset input file
+        }
+
+        // --- FUNGSI LAPORAN (SIMULASI) ---
+        function generateReportSummary() {
+            const totalQty = document.getElementById('total-qty').textContent;
+            const totalRolls = document.getElementById('total-rolls').textContent;
+            return `Laporan Stok Gulungan Kertas\n\nTotal Kuantitas: ${totalQty} Kg\nTotal Gulungan: ${totalRolls} pcs\n\nIni adalah laporan yang dibuat otomatis dari Aplikasi Dashboard Stok.`;
+        }
+
+        function sendWhatsAppReport() {
+            const summary = encodeURIComponent(generateReportSummary());
+            const phoneNumber = ''; // Kosongkan agar pengguna bisa mengisi sendiri
+            const url = `https://wa.me/${phoneNumber}?text=${summary}`;
+            window.open(url, '_blank');
+            showModal('info', 'Pengiriman WhatsApp', 'Anda akan dialihkan ke WhatsApp untuk mengirim laporan. Di aplikasi nyata, ini akan dikirim otomatis dari server.');
+        }
+
+        function sendEmailReport() {
+            const summary = encodeURIComponent(generateReportSummary());
+            const subject = encodeURIComponent("Laporan Stok Gulungan Kertas");
+            const url = `mailto:?subject=${subject}&body=${summary}`;
+            window.location.href = url;
+            showModal('info', 'Pengiriman Email', 'Klien email default Anda akan terbuka untuk mengirim laporan. Di aplikasi nyata, ini akan dikirim otomatis dari server.');
+        }
+
+        // --- FUNGSI MODAL NOTIFIKASI ---
+        function showModal(type, title, message) {
+            const modal = document.getElementById('notification-modal');
+            const iconContainer = document.getElementById('modal-icon');
+            const titleEl = document.getElementById('modal-title');
+            const messageEl = document.getElementById('modal-message');
+
+            titleEl.textContent = title;
+            messageEl.textContent = message;
+
+            let iconHtml, iconBg;
+            if (type === 'success') {
+                iconHtml = `<i data-lucide="check" class="h-6 w-6 text-green-600"></i>`;
+                iconBg = 'bg-green-100';
+            } else { // info
+                iconHtml = `<i data-lucide="info" class="h-6 w-6 text-blue-600"></i>`;
+                iconBg = 'bg-blue-100';
+            }
+            iconContainer.innerHTML = iconHtml;
+            iconContainer.className = `mx-auto flex items-center justify-center h-12 w-12 rounded-full ${iconBg}`;
+            lucide.createIcons();
+
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                modal.classList.remove('modal-exit');
+                modal.classList.add('modal-enter-active');
+            }, 10);
+        }
+
+        function hideModal() {
+            const modal = document.getElementById('notification-modal');
+            modal.classList.remove('modal-enter-active');
+            modal.classList.add('modal-exit-active');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('modal-exit-active');
+            }, 300);
+        }
+
+        // Inisialisasi aplikasi saat halaman dimuat
+        document.addEventListener('DOMContentLoaded', initializeApp);
+    </script>
+
+</body>
+</html>
+
