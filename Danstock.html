@@ -1,0 +1,667 @@
+import { ChangeDetectionStrategy, Component, computed, signal, OnInit, effect, WritableSignal } from '@angular/core';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, User } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+import { getFirestore, doc, setDoc, collection, query, onSnapshot, orderBy, getDocs, addDoc, deleteDoc, runTransaction } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+
+// Definisikan struktur data untuk Gulungan Kertas
+interface PaperRoll {
+  id: string;
+  type: 'Utuh' | 'Sisa'; // Jenis: Gulungan Utuh atau Sisa
+  widthCm: number;      // Lebar dalam cm
+  weightKg: number;     // Berat dalam kg
+  location: string;     // Lokasi penyimpanan (misal: A1, Rak 3)
+  dateAdded: number;    // Timestamp penambahan
+}
+
+// Inisialisasi variabel global dari lingkungan
+declare const __app_id: string;
+declare const __firebase_config: string;
+declare const __initial_auth_token: string;
+
+@Component({
+  selector: 'app-root',
+  standalone: true,
+  template: `
+    <!-- Header Aplikasi -->
+    <header class="bg-gray-800 text-white p-4 shadow-lg sticky top-0 z-10">
+      <div class="max-w-7xl mx-auto flex justify-between items-center">
+        <h1 class="text-2xl font-bold tracking-tight">Manajemen Stok Paper Roll</h1>
+        <div class="text-sm">
+          <p>User ID: <span class="font-mono text-yellow-300">{{ userId() || 'Authenticating...' }}</span></p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Konten Utama -->
+    <main class="p-4 md:p-8 max-w-7xl mx-auto">
+      <!-- Navigasi Tab -->
+      <div class="flex border-b border-gray-300 mb-6">
+        @for (tab of tabs; track tab.key) {
+          <button 
+            (click)="currentView.set(tab.key)"
+            [class]="currentView() === tab.key ? 'py-2 px-4 border-b-2 font-semibold text-indigo-600 border-indigo-600' : 'py-2 px-4 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-400'"
+            class="transition duration-150 ease-in-out text-sm md:text-base"
+          >
+            {{ tab.label }}
+          </button>
+        }
+      </div>
+
+      <!-- Tampilan Berdasarkan Tab -->
+      
+      <!-- 1. Stok Saat Ini (Inventory) -->
+      @if (currentView() === 'inventory') {
+        <section class="space-y-6">
+          <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">Inventori Paper Roll</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <div [class]="getStatCardClass('Utuh')">
+                    <p class="text-lg font-medium">Roll Utuh (Unit)</p>
+                    <p class="text-3xl font-bold">{{ stats().totalFull }}</p>
+                </div>
+                <div [class]="getStatCardClass('Sisa')">
+                    <p class="text-lg font-medium">Roll Sisa (Unit)</p>
+                    <p class="text-3xl font-bold">{{ stats().totalLeftover }}</p>
+                </div>
+                <div class="bg-blue-50 p-4 rounded-lg shadow-sm text-blue-700">
+                    <p class="text-lg font-medium">Total Berat (Kg)</p>
+                    <p class="text-3xl font-bold">{{ stats().totalWeight | number:'1.0-2' }}</p>
+                </div>
+                <div class="bg-yellow-50 p-4 rounded-lg shadow-sm text-yellow-700">
+                    <p class="text-lg font-medium">Rata-rata Lebar (Cm)</p>
+                    <p class="text-3xl font-bold">{{ stats().avgWidth | number:'1.0-1' }}</p>
+                </div>
+            </div>
+
+            <!-- Tabel Stok -->
+            <div class="overflow-x-auto bg-white rounded-lg border border-gray-200">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Jenis</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lebar (Cm)</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Berat (Kg)</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lokasi</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ditambahkan</th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  @for (roll of inventory(); track roll.id) {
+                    <tr class="hover:bg-gray-50">
+                      <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ roll.id.substring(0, 8) }}...</td>
+                      <td class="px-6 py-4 whitespace-nowrap">
+                        <span [class]="roll.type === 'Utuh' ? 'px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800' : 'px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800'">
+                          {{ roll.type }}
+                        </span>
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ roll.widthCm }}</td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ roll.weightKg | number:'1.0-2' }}</td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ roll.location }}</td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ formatDate(roll.dateAdded) }}</td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <button (click)="openDeleteModal(roll)" class="text-red-600 hover:text-red-900 transition-colors">Hapus</button>
+                      </td>
+                    </tr>
+                  } @empty {
+                    <tr>
+                      <td colspan="7" class="px-6 py-4 text-center text-gray-500">Tidak ada data stok saat ini. Silakan unggah data master atau tambahkan secara manual.</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      }
+
+      <!-- 2. Unggah Data Master (Excel Simulation) -->
+      @if (currentView() === 'upload') {
+        <section class="space-y-6">
+          <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">Unggah Data Master (Simulasi Excel)</h2>
+            <p class="text-sm text-gray-500 mb-4">Fitur ini mensimulasikan pembacaan file Excel. Dalam aplikasi nyata, Anda akan menggunakan pustaka `xlsx` untuk membaca data, tetapi di sini kami menggunakan data sampel statis.</p>
+
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center bg-gray-50 hover:bg-gray-100 transition-all">
+              <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v8" />
+              </svg>
+              <span class="mt-2 block text-sm font-medium text-gray-900">
+                Pilih file Excel Data Stok (Contoh: Stok.xlsx)
+              </span>
+              <input type="file" (change)="handleFileUpload($event)" class="sr-only" accept=".xlsx, .xls" id="file-upload">
+              <label for="file-upload" class="mt-3 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer transition-colors">
+                Pilih File
+              </label>
+            </div>
+            
+            <button 
+                (click)="uploadMockData()" 
+                [disabled]="isUploading()"
+                class="mt-6 w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition-colors"
+            >
+                @if (isUploading()) {
+                    <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Memproses...
+                } @else {
+                    Unggah Data Master ke Inventori (Simulasi)
+                }
+            </button>
+            
+            @if (uploadMessage()) {
+              <div class="mt-4 p-3 rounded-md bg-yellow-100 text-yellow-700 text-sm font-medium">{{ uploadMessage() }}</div>
+            }
+
+          </div>
+        </section>
+      }
+      
+      <!-- 3. Chart Report (Simple Visualization) -->
+      @if (currentView() === 'report') {
+        <section class="space-y-6">
+          <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">Laporan Visual (Simulasi Chart)</h2>
+            <p class="text-sm text-gray-500 mb-6">Visualisasi sederhana dari data stok berdasarkan berat dan jumlah unit.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <!-- Chart 1: Jumlah Unit berdasarkan Jenis -->
+                <div>
+                    <h3 class="text-lg font-medium mb-3">Total Unit berdasarkan Jenis</h3>
+                    <div class="space-y-4">
+                        <!-- Bar Utuh -->
+                        <div class="flex items-center">
+                            <span class="w-20 text-sm font-medium text-gray-600">Utuh:</span>
+                            <div class="flex-grow bg-gray-200 h-8 rounded-md overflow-hidden">
+                                <div [style.width.%]="chartData().percentFull" class="h-full bg-green-500 flex items-center px-2 transition-all duration-700 ease-out">
+                                    <span class="text-xs font-bold text-white shadow-sm">{{ stats().totalFull }} Unit ({{ chartData().percentFull | number:'1.0-0' }}%)</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Bar Sisa -->
+                        <div class="flex items-center">
+                            <span class="w-20 text-sm font-medium text-gray-600">Sisa:</span>
+                            <div class="flex-grow bg-gray-200 h-8 rounded-md overflow-hidden">
+                                <div [style.width.%]="chartData().percentLeftover" class="h-full bg-red-500 flex items-center px-2 transition-all duration-700 ease-out">
+                                    <span class="text-xs font-bold text-white shadow-sm">{{ stats().totalLeftover }} Unit ({{ chartData().percentLeftover | number:'1.0-0' }}%)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chart 2: Berat Total berdasarkan Jenis -->
+                <div>
+                    <h3 class="text-lg font-medium mb-3">Berat Total (Kg) berdasarkan Jenis</h3>
+                    <div class="space-y-4">
+                        <!-- Bar Berat Utuh -->
+                        <div class="flex items-center">
+                            <span class="w-20 text-sm font-medium text-gray-600">Utuh:</span>
+                            <div class="flex-grow bg-gray-200 h-8 rounded-md overflow-hidden">
+                                <div [style.width.%]="chartData().percentWeightFull" class="h-full bg-green-700 flex items-center px-2 transition-all duration-700 ease-out">
+                                    <span class="text-xs font-bold text-white shadow-sm">{{ stats().weightFull | number:'1.0-2' }} Kg ({{ chartData().percentWeightFull | number:'1.0-0' }}%)</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Bar Berat Sisa -->
+                        <div class="flex items-center">
+                            <span class="w-20 text-sm font-medium text-gray-600">Sisa:</span>
+                            <div class="flex-grow bg-gray-200 h-8 rounded-md overflow-hidden">
+                                <div [style.width.%]="chartData().percentWeightLeftover" class="h-full bg-red-700 flex items-center px-2 transition-all duration-700 ease-out">
+                                    <span class="text-xs font-bold text-white shadow-sm">{{ stats().weightLeftover | number:'1.0-2' }} Kg ({{ chartData().percentWeightLeftover | number:'1.0-0' }}%)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-8 pt-6 border-t border-gray-200">
+                <button (click)="openShareModal()" class="w-full md:w-auto inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.314l4.94 2.47a3 3 0 10.835-1.668 1 1 0 00-.012-.036l-4.94-2.47a1 1 0 000-1.782l4.94-2.47a1 1 0 00.01-.037.997.997 0 00.126-.372z" /></svg>
+                    Generate & Share Report
+                </button>
+            </div>
+
+          </div>
+        </section>
+      }
+
+    </main>
+    
+    <!-- Modal Hapus (Delete Confirmation) -->
+    @if (rollToDelete()) {
+        <div class="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50 transition-opacity" (click)="closeDeleteModal()">
+            <div class="bg-white rounded-lg shadow-xl max-w-sm w-full p-6" (click)="$event.stopPropagation()">
+                <h3 class="text-xl font-semibold text-gray-800 mb-4">Konfirmasi Hapus Data</h3>
+                <p class="text-gray-600 mb-6">Anda yakin ingin menghapus Paper Roll ID: <span class="font-mono bg-gray-100 p-1 rounded">{{ rollToDelete()!.id.substring(0, 8) }}...</span> (Jenis: {{ rollToDelete()!.type }}, Berat: {{ rollToDelete()!.weightKg | number:'1.0-2' }} Kg)?</p>
+                <div class="flex justify-end space-x-4">
+                    <button (click)="closeDeleteModal()" class="px-4 py-2 text-sm font-medium rounded-md text-gray-700 border border-gray-300 hover:bg-gray-100 transition-colors">
+                        Batal
+                    </button>
+                    <button (click)="deleteRoll(rollToDelete()!)" [disabled]="isDeleting()" class="px-4 py-2 text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 transition-colors">
+                        @if (isDeleting()) {
+                             <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                             Menghapus...
+                        } @else {
+                            Hapus Permanen
+                        }
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Modal Share Report -->
+    @if (isShareModalOpen()) {
+        <div class="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-50 transition-opacity" (click)="closeShareModal()">
+            <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6" (click)="$event.stopPropagation()">
+                <h3 class="text-xl font-semibold text-gray-800 mb-4">Bagikan Laporan Stok</h3>
+                <p class="text-gray-600 mb-4">Laporan summary telah dibuat. Pilih media untuk berbagi (simulasi).</p>
+                
+                <textarea 
+                    readonly 
+                    rows="8" 
+                    class="w-full p-3 border border-gray-300 rounded-md text-sm bg-gray-50 mb-4 font-mono resize-none"
+                    #reportTextarea
+                >{{ generatedReportText() }}</textarea>
+
+                <div class="flex flex-col space-y-3">
+                    <button (click)="copyReportToClipboard(reportTextarea)" class="w-full inline-flex items-center justify-center px-4 py-3 border border-gray-300 text-base font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-100 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-3" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg>
+                        {{ copyStatus() }}
+                    </button>
+
+                    <!-- Email Link Simulation -->
+                    <a [href]="getShareLink('email')" target="_blank" class="w-full inline-flex items-center justify-center px-4 py-3 text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-3" viewBox="0 0 20 20" fill="currentColor"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" /><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" /></svg>
+                        Bagikan via Email
+                    </a>
+
+                    <!-- WhatsApp Link Simulation -->
+                    <a [href]="getShareLink('whatsapp')" target="_blank" class="w-full inline-flex items-center justify-center px-4 py-3 text-base font-medium rounded-md shadow-sm text-white bg-green-500 hover:bg-green-600 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="h-5 w-5 mr-3" viewBox="0 0 16 16"><path d="M13.604 2.396A7.985 7.985 0 008 0C3.582 0 0 3.582 0 8a7.994 7.994 0 002.083 5.37l-1.42 5.166 5.37-1.42A7.987 7.987 0 008 16c4.418 0 8-3.582 8-8s-3.582-8-8-8zM8 14.5c-.718 0-1.41-.186-2.016-.54l-4.78 1.267 1.267-4.78a6.47 6.47 0 01-2.22-4.577C1.233 4.14 4.37 1.5 8 1.5c3.553 0 6.47 2.917 6.47 6.47s-2.917 6.47-6.47 6.47zm3.16-4.502c-.173-.284-.447-.384-.717-.514-.27-.13-.675-.24-1.28-.495-.605-.255-1.052-.613-1.407-.968-.355-.355-.632-.82-.782-1.355-.15-.535-.045-1.02.105-1.265.15-.245.335-.355.485-.43.15-.075.31-.18.47-.285.16-.105.31-.18.455-.33.145-.15.22-.355.15-.565-.07-.21-.295-.515-.405-.76-.11-.245-.22-.22-.325-.22-.105 0-.27-.015-.42-.015-.15 0-.4-.015-.615.225-.215.24-.81.795-.81 1.94 0 1.145.83 2.25 1.575 2.975.745.725 1.775 1.09 2.92 1.09 1.145 0 1.96-.34 2.685-.705.725-.365 1.13-1.08 1.13-1.78s-.24-.96-.45-1.165c-.21-.205-.485-.295-.665-.37z"/></svg>
+                        Bagikan via WhatsApp
+                    </a>
+                </div>
+
+                <div class="mt-6 text-right">
+                    <button (click)="closeShareModal()" class="px-4 py-2 text-sm font-medium rounded-md text-gray-700 border border-gray-300 hover:bg-gray-100 transition-colors">Tutup</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Loading Overlay -->
+    @if (isLoading()) {
+        <div class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-[100]">
+            <div class="flex flex-col items-center bg-white p-6 rounded-lg shadow-xl">
+                <svg class="animate-spin h-8 w-8 text-indigo-600 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p class="text-gray-700 font-medium">Memuat data...</p>
+            </div>
+        </div>
+    }
+
+    <!-- Footer -->
+    <footer class="text-center p-4 text-xs text-gray-500 border-t mt-8">
+        Aplikasi Stok Paper Roll - Powered by Angular & Firestore.
+    </footer>
+
+  `,
+  styles: `
+    /* Custom styling for angular component (using Tailwind implicitly) */
+    :host {
+        display: block;
+        min-height: 100vh;
+        background-color: #f4f7f9;
+        font-family: 'Inter', sans-serif;
+    }
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class App implements OnInit {
+  // --- Firebase/Auth/State Setup ---
+  private db: any;
+  private auth: any;
+  
+  // States
+  currentView = signal<'inventory' | 'upload' | 'report'>('inventory');
+  userId = signal<string | null>(null);
+  inventory = signal<PaperRoll[]>([]);
+  isLoading = signal(true);
+  
+  // Modals/Actions States
+  rollToDelete = signal<PaperRoll | null>(null);
+  isDeleting = signal(false);
+  isUploading = signal(false);
+  uploadMessage = signal('');
+  isShareModalOpen = signal(false);
+  copyStatus = signal('Salin Teks Laporan');
+
+
+  // Navigation tabs
+  tabs = [
+    { key: 'inventory', label: 'Stok Saat Ini' },
+    { key: 'upload', label: 'Unggah Data Master' },
+    { key: 'report', label: 'Chart & Laporan' },
+  ];
+
+  constructor() {
+    effect(() => {
+        // Logika untuk menampilkan pesan ke pengguna (opsional)
+        if (this.userId()) {
+            console.log("Authentication complete. User ID:", this.userId());
+            this.fetchInventory();
+        }
+    }, { allowSignalWrites: true });
+  }
+
+  // Lifecycle hook for initialization
+  ngOnInit(): void {
+    this.initFirebase();
+  }
+
+  // --- Firebase Initialization and Auth ---
+
+  private async initFirebase(): Promise<void> {
+    try {
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+
+        if (!firebaseConfig || Object.keys(firebaseConfig).length === 0) {
+            console.error("Firebase configuration is missing.");
+            this.isLoading.set(false);
+            return;
+        }
+
+        const app = initializeApp(firebaseConfig);
+        this.db = getFirestore(app);
+        this.auth = getAuth(app);
+
+        onAuthStateChanged(this.auth, async (user) => {
+            if (user) {
+                this.userId.set(user.uid);
+            } else {
+                // Sign in anonymously if no token provided or token expired
+                try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                         // Use custom token if available
+                        await signInWithCustomToken(this.auth, __initial_auth_token);
+                    } else {
+                        // Sign in anonymously as a fallback
+                        await signInAnonymously(this.auth);
+                    }
+                } catch (error) {
+                    console.error("Error during authentication:", error);
+                }
+            }
+            this.isLoading.set(false); // Authentication check done
+        });
+
+    } catch (error) {
+        console.error("Error initializing Firebase:", error);
+        this.isLoading.set(false);
+    }
+  }
+
+  // --- Firestore Data Operations ---
+
+  private getCollectionPath(uid: string): string {
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    return `/artifacts/${appId}/users/${uid}/paper_rolls`;
+  }
+
+  private fetchInventory(): void {
+    const uid = this.userId();
+    if (!this.db || !uid) return;
+
+    const collectionRef = collection(this.db, this.getCollectionPath(uid));
+    
+    // Listen for real-time changes
+    onSnapshot(collectionRef, (snapshot) => {
+      const rolls: PaperRoll[] = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        rolls.push({
+          id: doc.id,
+          type: data['type'],
+          widthCm: data['widthCm'],
+          weightKg: data['weightKg'],
+          location: data['location'],
+          dateAdded: data['dateAdded'],
+        } as PaperRoll);
+      });
+      this.inventory.set(rolls);
+    }, (error) => {
+      console.error("Error listening to inventory:", error);
+    });
+  }
+
+  // --- Excel Simulation Logic ---
+
+  handleFileUpload(event: Event): void {
+    // Di lingkungan nyata, ini akan memicu pembacaan file dengan XLSX library.
+    // Di sini, kita hanya mencatat file terpilih.
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      this.uploadMessage.set(`File terpilih: ${input.files[0].name}. Tekan tombol 'Unggah' untuk memuat data sampel.`);
+    }
+  }
+
+  async uploadMockData(): Promise<void> {
+    const uid = this.userId();
+    if (!this.db || !uid) {
+        this.uploadMessage.set('Autentikasi belum siap. Mohon tunggu.');
+        return;
+    }
+
+    this.isUploading.set(true);
+    this.uploadMessage.set('Memproses unggahan data master...');
+
+    // Data sampel untuk simulasi:
+    const mockData: Omit<PaperRoll, 'id'>[] = [
+        { type: 'Utuh', widthCm: 120, weightKg: 850, location: 'A-01', dateAdded: Date.now() - 86400000 * 2 },
+        { type: 'Utuh', widthCm: 100, weightKg: 720, location: 'A-02', dateAdded: Date.now() - 86400000 * 5 },
+        { type: 'Sisa', widthCm: 80, weightKg: 150.5, location: 'B-05', dateAdded: Date.now() - 86400000 * 1 },
+        { type: 'Sisa', widthCm: 90, weightKg: 250.7, location: 'B-06', dateAdded: Date.now() - 86400000 * 1 },
+        { type: 'Utuh', widthCm: 140, weightKg: 900, location: 'A-03', dateAdded: Date.now() - 86400000 * 3 },
+        { type: 'Sisa', widthCm: 120, weightKg: 50.1, location: 'B-10', dateAdded: Date.now() },
+    ];
+
+    try {
+        await runTransaction(this.db, async (transaction) => {
+            const collectionRef = collection(this.db, this.getCollectionPath(uid));
+            
+            // 1. Hapus semua data yang ada (simulasi overwrite master data)
+            const snapshot = await getDocs(collectionRef);
+            snapshot.docs.forEach(doc => {
+                transaction.delete(doc.ref);
+            });
+            
+            // 2. Tambahkan data mock baru
+            mockData.forEach(roll => {
+                const newDocRef = doc(collectionRef); // Generate new document reference with auto ID
+                transaction.set(newDocRef, roll);
+            });
+        });
+
+        this.uploadMessage.set(`Berhasil mengunggah ${mockData.length} data Paper Roll ke inventori!`);
+    } catch (error) {
+        console.error("Gagal mengunggah data master:", error);
+        this.uploadMessage.set('Gagal mengunggah data master. Lihat konsol untuk detail.');
+    } finally {
+        this.isUploading.set(false);
+    }
+  }
+
+  // --- Delete Logic ---
+
+  openDeleteModal(roll: PaperRoll): void {
+    this.rollToDelete.set(roll);
+  }
+
+  closeDeleteModal(): void {
+    this.rollToDelete.set(null);
+  }
+
+  async deleteRoll(roll: PaperRoll): Promise<void> {
+    const uid = this.userId();
+    if (!this.db || !uid) return;
+
+    this.isDeleting.set(true);
+    try {
+        const docRef = doc(this.db, this.getCollectionPath(uid), roll.id);
+        await deleteDoc(docRef);
+        this.closeDeleteModal();
+    } catch (error) {
+        console.error("Gagal menghapus roll:", error);
+    } finally {
+        this.isDeleting.set(false);
+    }
+  }
+
+  // --- Reporting & Computed Values ---
+
+  // Computed signal for statistics
+  stats = computed(() => {
+    const inv = this.inventory();
+    
+    const totalFull = inv.filter(r => r.type === 'Utuh').length;
+    const totalLeftover = inv.filter(r => r.type === 'Sisa').length;
+    const totalUnits = inv.length;
+
+    const weightFull = inv
+        .filter(r => r.type === 'Utuh')
+        .reduce((sum, r) => sum + r.weightKg, 0);
+    
+    const weightLeftover = inv
+        .filter(r => r.type === 'Sisa')
+        .reduce((sum, r) => sum + r.weightKg, 0);
+
+    const totalWeight = weightFull + weightLeftover;
+    
+    const totalWidth = inv.reduce((sum, r) => sum + r.widthCm, 0);
+    const avgWidth = totalUnits > 0 ? totalWidth / totalUnits : 0;
+
+    return {
+        totalFull,
+        totalLeftover,
+        totalUnits,
+        weightFull,
+        weightLeftover,
+        totalWeight,
+        avgWidth
+    };
+  });
+
+  // Computed signal for chart visualization data
+  chartData = computed(() => {
+      const s = this.stats();
+      const totalUnits = s.totalUnits;
+      const totalWeight = s.totalWeight;
+
+      // Unit percentages
+      const percentFull = totalUnits > 0 ? (s.totalFull / totalUnits) * 100 : 0;
+      const percentLeftover = totalUnits > 0 ? (s.totalLeftover / totalUnits) * 100 : 0;
+      
+      // Weight percentages
+      const percentWeightFull = totalWeight > 0 ? (s.weightFull / totalWeight) * 100 : 0;
+      const percentWeightLeftover = totalWeight > 0 ? (s.weightLeftover / totalWeight) * 100 : 0;
+
+      return {
+          percentFull,
+          percentLeftover,
+          percentWeightFull,
+          percentWeightLeftover
+      };
+  });
+  
+  // Helper for styling stat cards
+  getStatCardClass(type: 'Utuh' | 'Sisa'): string {
+      const base = "p-4 rounded-lg shadow-sm";
+      if (type === 'Utuh') {
+          return `${base} bg-green-50 text-green-700`;
+      }
+      return `${base} bg-red-50 text-red-700`;
+  }
+
+  // Helper for formatting date
+  formatDate(timestamp: number): string {
+    return new Date(timestamp).toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  // --- Report Sharing Logic ---
+  
+  // Computed signal for the report text
+  generatedReportText = computed(() => {
+    const s = this.stats();
+    const now = new Date().toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const lineBreak = '\n';
+    
+    let report = `LAPORAN STOK PAPER ROLL\n`;
+    report += `==========================\n`;
+    report += `Tanggal Laporan: ${now}${lineBreak}${lineBreak}`;
+    report += `SUMMARY STOK UNIT:${lineBreak}`;
+    report += `- Total Roll Utuh: ${s.totalFull} unit\n`;
+    report += `- Total Roll Sisa: ${s.totalLeftover} unit\n`;
+    report += `- GRAND TOTAL UNIT: ${s.totalUnits} unit${lineBreak}${lineBreak}`;
+
+    report += `SUMMARY STOK BERAT (Kg):${lineBreak}`;
+    report += `- Berat Roll Utuh: ${s.weightFull.toFixed(2)} Kg\n`;
+    report += `- Berat Roll Sisa: ${s.weightLeftover.toFixed(2)} Kg\n`;
+    report += `- GRAND TOTAL BERAT: ${s.totalWeight.toFixed(2)} Kg${lineBreak}${lineBreak}`;
+
+    report += `STATISTIK TAMBAHAN:${lineBreak}`;
+    report += `- Rata-rata Lebar: ${s.avgWidth.toFixed(1)} Cm\n`;
+    report += `- User ID Pelapor: ${this.userId()}`;
+    
+    return report;
+  });
+
+  openShareModal(): void {
+    // Reset status and open modal
+    this.copyStatus.set('Salin Teks Laporan');
+    this.isShareModalOpen.set(true);
+  }
+
+  closeShareModal(): void {
+    this.isShareModalOpen.set(false);
+  }
+
+  // Generate shareable link (Email/WhatsApp simulation)
+  getShareLink(type: 'email' | 'whatsapp'): string {
+    const reportText = this.generatedReportText();
+    const encodedText = encodeURIComponent(reportText);
+
+    if (type === 'email') {
+      // Standard mailto link
+      const subject = encodeURIComponent('Laporan Stok Paper Roll Terbaru');
+      return `mailto:?subject=${subject}&body=${encodedText}`;
+    } else if (type === 'whatsapp') {
+      // WhatsApp Web/Mobile link
+      return `https://wa.me/?text=${encodedText}`;
+    }
+    return '#';
+  }
+
+  // Copy to clipboard logic (alternative to navigator.clipboard for iFrame compatibility)
+  copyReportToClipboard(textarea: HTMLTextAreaElement): void {
+    try {
+        textarea.select();
+        document.execCommand('copy');
+        this.copyStatus.set('Berhasil Disalin! 👍');
+    } catch (err) {
+        console.error('Could not copy text: ', err);
+        this.copyStatus.set('Gagal Menyalin! ❌');
+    }
+    setTimeout(() => this.copyStatus.set('Salin Teks Laporan'), 3000);
+  }
+
+}
+
